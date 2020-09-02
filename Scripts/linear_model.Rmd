@@ -1,0 +1,197 @@
+---
+title: "Linear Model"
+output: 
+---
+
+```{r}
+library(dplyr)
+library(readr)
+library(lubridate)
+library(tidyr)
+library(circular)
+library(corrplot)
+library(dummies)
+library(ggplot2)
+library(ggfortify)
+```
+
+PREPARING THE DATA
+--------------------------------------------------------------------------------------------------------------------
+
+
+```{r include=FALSE}
+# Import vanishing bearing dataset
+vanishing_bearings_v2 <- read_csv("../Data/vanishing_bearings_v2.csv")
+# Import bird data
+bird_data <- read_csv("../Data/bird_data_processed.csv")
+# Import wind data
+wind_data <- read_csv("../Data/wind_interp_tidy.csv")
+```
+
+```{r}
+# Remove birds that had equal detections for East and West and no detections for North
+vanishing_bearings_v2 <- vanishing_bearings_v2 %>% 
+                         filter(!(mfgID %in% c(21, 26, 281, 414)))
+```
+
+```{r}
+# Calculate u and v components of vanishing bearing
+bird_speed_assumption <- 10 # m/s
+
+vanishing_bearings_v2 <- vanishing_bearings_v2 %>% 
+            
+                         # Add ubird column
+                         mutate(ubird = round(sin(rad(vanishing_bearing)) * bird_speed_assumption, 8),
+                                vbird = round(cos(rad(vanishing_bearing)) * bird_speed_assumption, 8))
+```
+
+```{r}
+# Clean up bird data
+
+bird_data <- bird_data %>% 
+  
+            # Filter for mfgID's with vanishing bearings
+            filter(mfgID %in% vanishing_bearings_v2$mfgID) %>% 
+  
+            # Change day column to be depart_night day
+            mutate(day = day(depart_night)) %>% 
+  
+            # Select for relevant variables
+            select(spcd, mfgID, year, day, sex, age, wing, tarsus, wt, fat, lean, mlos, depart_night, depart_type)
+```
+
+```{r}
+# Clean up wind data
+wind_data <- wind_data %>% 
+              
+             # Remove X1 column which is just row indexes
+             select(datetime:tailwind_angle) %>% 
+  
+             # Split year and time into two columns
+             separate(datetime, into = c("date", "time"), sep = " ") %>% 
+  
+             # Filter for departure days
+             filter(date %in% as.character(bird_data$depart_night)) %>% 
+  
+             # Remove unnecessary variables
+             select(date, uwind_interp, vwind_interp) %>% 
+
+             # Rename date column to depart_night to be able to join data frames later
+             rename(depart_night = date)
+```
+
+```{r}
+# Join bird data and vanishing bearings
+data_final <- right_join(bird_data, vanishing_bearings_v2, by = "mfgID") %>% 
+    
+              # Remove minutes_used column
+              select(-minutes_used) %>% 
+  
+              # Convert depart_night to character to be able to join with wind_data
+              mutate(depart_night = as.character(depart_night))
+```
+
+```{r}
+# Join wind data to data_final
+data_final <- data_final %>% 
+              right_join(wind_data, by = "depart_night") %>% 
+  
+              # Reorder to have main variables at the front
+              select(mfgID, depart_night, ubird, vbird, uwind_interp, vwind_interp, everything())
+```
+
+
+MODEL
+-------------------------------------------------------------------------------------------------------------------
+
+
+```{r}
+# Correlation plot
+
+# First select for quantitative variables only
+data_final_quant_only <- data_final %>% 
+                         select(ubird, vbird, uwind_interp, vwind_interp, wing, tarsus, wt, fat, lean, mlos)
+
+corrplot(cor(data_final_quant_only), method = "number")
+```
+
+```{r}
+# Create dummy variables of categorical variables
+
+data_final_dummies <- cbind(data_final, dummy(data_final$spcd))
+data_final_dummies <- cbind(data_final_dummies, dummy(data_final$year))
+data_final_dummies <- cbind(data_final_dummies, dummy(data_final$sex))
+data_final_dummies <- cbind(data_final_dummies, dummy(data_final$age))
+data_final_dummies <- cbind(data_final_dummies, dummy(data_final$depart_type))
+```
+
+```{r}
+# u component linear model
+
+# Select for variables being used
+data_final_dummies <- select(data_final_dummies, -mfgID, -depart_night, -spcd, -year, -day, -sex, -age,                                                             -depart_type, -vanishing_bearing, -n_detections_0,                                                                 -n_detections_90, -n_detections_270, -n_detections_120,                                                            -n_detections_240)
+
+# Create the linear model
+u_model <- lm(ubird ~ ., data = data_final_dummies)
+summary(u_model)
+```
+```{r}
+# start with spcd, age, year, wt, and drop them sequentially
+u_model2 <- lm(ubird ~ uwind_interp + spcd + age + year + wt, data = data_final)
+summary(u_model2)
+
+```
+
+```{r}
+# u model only using uwind_interp
+u_model3 <- lm(ubird ~ uwind_interp, data = data_final)
+summary(u_model3)
+
+```
+
+```{r}
+# start with spcd, age, year, wt, and drop them sequentially
+v_model2 <- lm(vbird ~ vwind_interp + spcd + age + year + wt, data = data_final)
+summary(v_model2)
+
+```
+
+```{r}
+# v model with only vwind_interp
+v_model3 <- lm(vbird ~ vwind_interp, data = data_final)
+summary(v_model3)
+
+```
+
+
+```{r}
+autoplot(u_model2)
+
+# Also run Spearman correlation
+```
+
+```{r}
+# v component linear model
+
+v_model <- lm(vbird ~ ., data = data_final_dummies)
+summary(v_model)
+```
+
+```{r}
+# Graph ubird vs. uwind
+
+ggplot(data = data_final, aes(x = uwind_interp, y = ubird, color = as.factor(year), group = as.factor(year))) +
+  
+  geom_point() + 
+  geom_smooth(method = "lm")
+```
+
+```{r}
+# Graph vbird vs. vwind
+
+ggplot(data = data_final, aes(x = vwind_interp, y = vbird, color = as.factor(year), group = as.factor(year))) +
+  
+  geom_point() + 
+  geom_smooth(method = "lm")
+```
+

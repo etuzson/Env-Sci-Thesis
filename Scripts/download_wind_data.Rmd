@@ -1,0 +1,139 @@
+---
+title: "Circular Plot of Wind Direction"
+output:
+---
+
+```{r include=FALSE}
+rm(list = ls())
+
+library(circular)
+library(dplyr)
+library(lubridate)
+library(RNCEP)
+library(ggplot2)
+library(readr)
+```
+
+```{r}
+# Formatted version saved as datetime_tidy.csv, import directly
+
+# Import datetime.csv
+ dt <- read.csv("../Data/datetime.csv")
+```
+
+```{r}
+# Format datetime.csv
+
+# Convert date to proper format
+dt$date <- mdy(dt$date)
+
+
+dt_tidy <-  dt %>%
+  
+            # Filter for May in 2014 and 2015 only
+            filter(month(date) == 5, year(date) == 2014 | year(date) == 2015) %>% 
+  
+            # Combine date and time into one column and create one for 6:00:00 as well
+            mutate(datetime = paste(date, time, sep = " "), 
+                   datetime2 = paste(date, "06:00:00", sep = " "))
+
+# Convert new columns to proper date format
+dt_tidy$datetime <- ymd_hms(dt_tidy$datetime, tz = "GMT")
+dt_tidy$datetime2 <- ymd_hms(dt_tidy$datetime2, tz = "GMT")
+
+head(dt_tidy)
+```
+
+```{r}
+write.csv(dt_tidy, "../Data/datetime_tidy.csv")
+```
+
+```{r eval=FALSE, include=FALSE}
+# Download and formatting complete, file saved as wind_interp_tidy.csv, import directly
+
+# Download uwind and vwind (takes a while)
+uwind_interp <- NCEP.interp(
+  variable = "uwnd",
+  level = 925,
+  lat = 42.583,
+  lon = -80.397,
+  dt = dt_tidy$datetime,
+  reanalysis2 = TRUE,
+  keep.unpacking.info = TRUE,
+  interpolate.space = TRUE,
+  interpolate.time = TRUE
+)
+
+vwind_interp <- NCEP.interp(
+  variable = "vwnd",
+  level = 925,
+  lat = 42.583,
+  lon = -80.397,
+  dt = dt_tidy$datetime,
+  reanalysis2 = TRUE,
+  keep.unpacking.info = TRUE,
+  interpolate.space = TRUE,
+  interpolate.time = TRUE
+)
+```
+
+```{r}
+# Convert to data frame
+uwind_interp <- data.frame(uwind_interp)
+vwind_interp <- data.frame(vwind_interp)
+head(uwind_interp)
+head(vwind_interp)
+```
+
+```{r}
+# Consolidate uwind and vwind data frames into one data frame
+wind_interp_tidy <- mutate(uwind_interp, vwind_interp = vwind_interp$vwind_interp, datetime = dt_tidy$datetime, lat = 42.583, lon = -80.397)
+wind_interp_tidy <- select(wind_interp_tidy, datetime, lat, lon, everything())
+
+head(wind_interp_tidy)
+```
+
+
+```{r}
+# Functions to calculate tailwind speed and angle
+tailwind_speed <- function(uwind, vwind) {
+  tailwind_speed <- sqrt(uwind ^ 2 + vwind ^ 2)
+  return(tailwind_speed)
+}
+tailwind_angle <- function(uwind, vwind) {
+  if(uwind >= 0 && vwind >= 0) {
+    tailwind_angle <- atan(uwind / vwind) * (180 / pi)
+  }
+  else if(uwind >= 0 && vwind <= 0) {
+    tailwind_angle <- 90 + atan(abs(vwind) / uwind) * (180 / pi)
+  }
+  else if(uwind <= 0 && vwind <= 0) {
+    tailwind_angle <- 180 + atan(abs(uwind) / abs(vwind)) * (180 / pi)
+  } 
+  else {
+    tailwind_angle <- 270 + atan(vwind / abs(uwind)) * (180 / pi)
+  }
+  return(tailwind_angle)
+}
+tailwind_angle <- Vectorize(tailwind_angle)
+```
+
+```{r}
+# Use the new functions to do the calculations
+wind_interp_tidy <- mutate(wind_interp_tidy, 
+                           tailwind_speed = tailwind_speed(wind_interp_tidy$uwind_interp,     
+                                                           wind_interp_tidy$vwind_interp),
+                           tailwind_angle = tailwind_angle(wind_interp_tidy$uwind_interp,
+                                                           wind_interp_tidy$vwind_interp))
+
+# Convert to type circular, only useful if using library circular's plots
+# wind_interp_tidy$tailwind_angle <- as.circular(wind_interp_tidy$tailwind_angle, units = "degrees")
+
+head(wind_interp_tidy)
+str(wind_interp_tidy)
+```
+
+```{r}
+# Save the data
+write.csv(wind_interp_tidy, "../Data/wind_interp_tidy.csv")
+```

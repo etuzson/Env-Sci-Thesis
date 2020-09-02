@@ -1,0 +1,41 @@
+mfgID	Reason
+  9     depart_time was 5.88 hours after sunset. Signal data looks messy with no clear departure pattern. Was also not picked up by any location other than Old Cut.
+  12    depart_time was 4 hours after sunset. Signal data messy with no clear departure pattern. Only detected at Old Cut.
+  19    depart_time was 4 hours after sunset. No clear departure pattern. Only detected at Old Cut.
+  33    Unusual departure pattern
+  278   last_day and depart_time are NA. No detection at Old Cut. There are detections at Western_University_Trailer_OldCut and other towers
+  279   last_day and depart_time are NA. Detections at Old Cut and other towers however
+  282   Only detected at Western_University_Trailer_OldCut
+  284   Only detected at Western_University_Trailer_OldCut
+  287   Unusual departure pattern
+  294   Last detected at Western_University_Trailer_OldCut even though it was also picked up at Old Cut
+  297   Few North detections
+  299   Only detected at Western_University_Trailer_OldCut and other towers but not Old Cut
+  302   Only detected at Western_University_Trailer_OldCut and other towers but not Old Cut
+  304   last_day and depart_time are NA. Shows departure pattern. Picked up at both Old Cut towers. Last detection at Western_University_Trailer_OldCut instead of Old Cut
+  407   depart_time only NA. Only detected at both Old Cut towers. No clear departure pattern
+  412   Last detected at Western_University_Trailer_OldCut even though it was also picked up at Old Cut
+  413   Only detected at Western_University_Trailer_OldCut and other towers but not Old Cut
+  416   Last detected at Western_University_Trailer_OldCut even though it was also picked up at Old Cut
+  424   depart_time only NA. Found departure time for this one though
+  426   depart_time only NA. Found departure time for this one though
+  427   unusual departure pattern
+  428   lack of signal data
+  431   lack of signal data
+  442   unusual departure pattern
+  444   No clear departure pattern. depart_time 4 hours after sunset. Only detected at Old Cut
+  447   No clear departure pattern. depart_time is NA. Only detected at Old Cut
+  450   no North detections after depart time
+  452   only one antenna detection after depart time
+  449   depart_time only NA. Found departure time for this one though
+  452   depart_time only NA. Found departure time for this one though
+  453   depart_time and last_day is NA. Detected at one other tower may be possible to get vanishing bearing
+  454   depart_time and last_day is NA. Detected at one other tower may be possible to get vanishing bearing
+  455   depart_time only NA. Found departure time for this one though
+  457   3 day difference between last_day and depart_night. Detected at multiple towers. May be possible to get vanishing bearing
+  472   depart_time and last_day is NA. Detected at one other towers may be possible to get vanishing bearing
+  475   depart_time 4 hours after sunset. No clear departure pattern
+  489   depart time 3.8 hours after sunset. No clear departure pattern
+  491   depart time 5.8 hours after sunset. No clear departure pattern
+  493   last_day and depart_time are NA. No clear departure pattern though maybe you could calculate vanishing bearing
+  494   depart time 3.8 hours after sunset. No clear departure pattern

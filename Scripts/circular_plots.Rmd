@@ -1,0 +1,173 @@
+---
+title: "Circular_Plots"
+output:
+---
+
+```{r include=FALSE}
+library(dplyr)
+library(circular)
+library(readr)
+library(lubridate)
+library(ggplot2)
+```
+
+```{r include=FALSE}
+# Import datasets
+wind_data <- read_csv("../Data/wind_interp_tidy.csv")
+bird_data <- read_csv("../Data/morbey_radio.csv")
+```
+
+```{r}
+# Filter according to departure type, select for last_day, add time to last_day
+last_day <- filter(bird_data, depart_type %in% c("Interrupted", "Uninterrupted", "LPBOTip")) %>%
+  select(last_day) %>% 
+  filter(!is.na(last_day)) %>% 
+  mutate(last_day = paste(last_day, "19:00:00", sep = " ")) %>% 
+  mutate(last_day = mdy_hms(last_day, tz = "GMT"))
+```
+
+```{r}
+# Create filtered data by departure day
+wind_data_filtered <- filter(wind_data, datetime %in% last_day$last_day)
+```
+
+```{r}
+# Using ggplot create unfiltered circular plot
+
+(g1 <- ggplot(data = wind_data) +
+   
+  geom_point(mapping = aes(
+    x = tailwind_angle, 
+    y = tailwind_speed
+    )) +
+
+  scale_x_continuous(
+    breaks = c(0, 90, 180, 270),
+    labels = c("N", "E", "S", "W"), 
+    limits = c(0, 360)
+    ) +
+   
+  scale_y_continuous(
+    breaks = 1:10
+    ) +
+   
+  xlab("") +
+   
+  ylab("Wind Speed (m/s)") +
+   
+  labs(title = "May 2014 & 2015 Wind Data") +
+   
+  theme(plot.title = element_text(size = 11, hjust = 0.5)) +
+   
+  coord_polar()) 
+   
+
+
+# Filtered by departure days
+
+(g2 <- ggplot(data = wind_data_filtered) +
+    
+  geom_point(mapping = aes(
+    x = tailwind_angle,
+    y = tailwind_speed
+    )) +
+    
+  scale_x_continuous(
+    breaks = c(0, 90, 180, 270),
+    labels = c("N", "E", "S", "W"),
+    limits = c(0, 360)
+    ) +
+    
+  scale_y_continuous(
+    breaks = 1:10
+    ) +
+    
+  xlab("") +
+    
+  ylab("Wind Speed (m/s)") +
+    
+  ggtitle("May 2014 & 2015 Wind Data Filtered By Departure Days") +
+    
+  theme(plot.title = element_text(size = 11, hjust = 0.5)) +
+    
+  coord_polar())
+```
+
+```{r}
+ggsave("../Plots/wind_all.pdf", plot = g1)
+ggsave("../Plots/wind_birds.pdf", plot = g2)
+ggsave("../Plots/wind_all.png", plot = g1)
+ggsave("../Plots/wind_birds.png", plot = g2)
+```
+
+```{r}
+# Create histogram of wind u and v vectors and overlay filtered version
+
+# uwind
+(g3 <- ggplot(data = wind_data) +
+   
+   geom_histogram(mapping = aes(
+       x = uwind_interp
+   ),
+   binwidth = 1,
+   colour = "white") +
+   
+   geom_histogram(data = wind_data_filtered, mapping = aes(
+     x = uwind_interp
+   ),
+   binwidth = 1,
+   colour = "white",
+   fill = "gray50") +
+   
+   labs(
+     title = "Distribution of uwind component for May 2014 & 2015",
+     x = "uwind Speed (m/s)"
+   ) + 
+   
+   scale_x_continuous(
+     breaks = c(-8:8),
+     limits = c(-8, 8)
+   ) +
+   
+   theme(plot.title = element_text(size = 14, hjust = 0.5))
+)
+```
+
+```{r}
+# vwind
+(g4 <- ggplot(data = wind_data) +
+   
+   geom_histogram(mapping = aes(
+       x = vwind_interp
+   ),
+   binwidth = 1,
+   colour = "white") +
+   
+   geom_histogram(data = wind_data_filtered, mapping = aes(
+     x = vwind_interp
+   ),
+   binwidth = 1,
+   colour = "white",
+   fill = "gray50") +
+   
+   labs(
+     title = "Distribution of vwind component for May 2014 & 2015",
+     x = "vwind Speed (m/s)"
+   ) + 
+   
+   scale_x_continuous(
+     breaks = c(-8:8),
+     limits = c(-8, 8)
+   ) +
+   
+   theme(plot.title = element_text(size = 14, hjust = 0.5))
+)
+```
+
+```{r}
+ggsave("../Plots/uwind_hist.pdf", plot = g3)
+ggsave("../Plots/vwind_hist.pdf", plot = g4)
+ggsave("../Plots/uwind_hist.png", plot = g3)
+ggsave("../Plots/vwind_hist.png", plot = g4)
+```
+

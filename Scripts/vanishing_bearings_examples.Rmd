@@ -1,0 +1,186 @@
+---
+title: "Vanishing Bearings"
+output: 
+---
+
+From Motus R Book Chapter 7: Vanishing Bearings
+
+```{r}
+rm(list = ls())
+Sys.setenv(TZ = "UTC")
+
+library(circular)
+library(tidyverse)
+library(motus)
+library(motusData)
+library(jpeg)
+library(ggmap)
+library(lubridate)
+```
+
+```{r}
+df.vanish <- vanishBearing %>% 
+  mutate(recvSiteName = reorder(recvSiteName, recvLat), motusTagID = as.factor(as.character(motusTagID))) %>% 
+  arrange(ts)
+```
+
+```{r}
+# Select individuals that show clear departure detection
+ggplot(data = df.vanish, aes(x = ts, y = recvLat, colour = as.factor(recvSiteName))) +
+  geom_point(pch = 21) +
+  facet_wrap(~ motusTagID, scales = "free", ncol = 1) + 
+  theme_bw()
+```
+
+```{r}
+# Plot signal strength by time in last few hours before departure at Old Cut for tag #16823
+ggplot(data = filter(df.vanish, motusTagID == 16823, ts > "2015-05-30 00:00:00"), 
+       aes(x = ts, y = sig, color = as.factor(port))) +
+  theme_bw() +
+  geom_point(pch = 21) + 
+  facet_grid(recvSiteName ~ .)
+```
+
+```{r}
+# Obtain departure times
+ggplot(data = filter(df.vanish, motusTagID == 16823), aes(x = ts, y = sig, colour = as.factor(antBearing))) +
+  theme_bw() +
+  geom_point() +
+  facet_grid(recvSiteName ~ .)
+```
+
+```{r}
+# Zoom into plot to determine departure time
+ggplot(data = filter(df.vanish, 
+                     motusTagID == 16823,  
+                     ts > "2015-05-30 03:03:00",  
+                     ts < "2015-05-30 03:10:00"), 
+       aes(x = ts, y = sig, colour= as.factor(antBearing))) + 
+  theme_bw() + 
+  geom_point()
+```
+
+```{r}
+## create dataframe and assign column names
+dep.16823 <- as.data.frame(cbind(16823, "2015-05-30 03:04:59"))
+
+## create dataframes for the other two tags:
+dep.16867 <- as.data.frame(cbind(16867, "2015-05-29 01:56:00"))
+dep.16791 <- as.data.frame(cbind(16791, "2015-05-08 02:41:40"))
+
+## put them all together
+df.departTime <- rbind(dep.16823, dep.16867, dep.16791)
+names(df.departTime) <- c("motusTagID", "ts_depart")
+
+## convert time to posixCT using Lubridate functionality
+df.departTime <- mutate(df.departTime, ts_depart = ymd_hms(ts_depart))
+
+df.departTime
+```
+
+```{r}
+## Merge sample data with departure times, subset data, and calculate vanishing bearing
+
+## Note that we use the recvSiteName to specify the departure station of
+## interest. Depending on whether the station has moved or changed names with
+## deployments, recvDeployID might be more appropriate.
+
+depart.station <- "Old Cut"
+min.sig <- -78.0691 # normally max/min sig comes from the complete raw data for a station
+max.sig <- -17.8707
+
+# in this case, right join should drop any individuals that don't have departure
+# times in df.departTime
+df.vanishBearing <- right_join(df.vanish, df.departTime, by = "motusTagID") %>% 
+  filter(ts >= ts_depart,
+         recvSiteName == depart.station) %>%
+  distinct() %>%
+  mutate(sig.norm = (sig - (min.sig))/((max.sig)-(min.sig)), 
+         circ.bear = circular(antBearing, 
+                              type = c("angles"), 
+                              units = c("degrees"), 
+                              rotation = c("clock"))) %>% 
+  group_by(motusTagID, recvSiteName, recvLat, recvLon) %>% 
+  summarise(vanish.bearing = weighted.mean(circ.bear, sig.norm, na.rm = FALSE, 
+                                           control.circular = list(type = "angles", 
+                                                                   units = "degrees", 
+                                                                   template = "none", 
+                                                                   rotation = "clock")),
+            minutes.used = as.duration(min(ts) %--% max(ts))) %>%
+  as.data.frame()
+```
+
+```{r}
+# if you have many bearings/points, can use stack = TRUE
+plot.circular(df.vanishBearing$vanish.bearing, zero = pi/2)
+arrows.circular(mean(df.vanishBearing$vanish.bearing), zero = pi/2)
+```
+
+```{r}
+tagID <- 16823
+## First we obtain a map of our location of interest, in this case Old Cut
+map.OC <-  get_stamenmap(bbox = c(left = -80.6, right = -80.2, bottom = 42.5, top = 42.75),
+                   maptype = "terrain-background",
+                   zoom = 12,
+                   color = "color")
+
+## Do the following to make a scale bar
+bb <- attr(map.OC,"bb")
+sbar <- data.frame(lon.start = c(bb$ll.lon + 0.1*(bb$ur.lon - bb$ll.lon)),
+                   lon.end = c(bb$ll.lon + 0.25*(bb$ur.lon - bb$ll.lon)),
+                   lat.start = c(bb$ll.lat + 0.1*(bb$ur.lat - bb$ll.lat)),
+                   lat.end = c(bb$ll.lat + 0.1*(bb$ur.lat - bb$ll.lat)))
+
+sbar$distance <- geosphere::distVincentyEllipsoid(c(sbar$lon.start,sbar$lat.start),
+                                                  c(sbar$lon.end,sbar$lat.end))
+scalebar.length <- 10
+sbar$lon.end <- sbar$lon.start + 
+  ((sbar$lon.end-sbar$lon.start)/sbar$distance)*scalebar.length*1000
+ptspermm <- 2.83464567  # need this because geom_text uses mm, and themes use pts.
+
+## To map antenna bearings:
+## Create a station dataframe with antenna bearings for all antennas with
+## detections for the tag of interest
+df.stations <- df.vanish %>%
+  filter(motusTagID == tagID) %>%
+  select(recvSiteName, antBearing, port, recvLon, recvLat) %>%
+  distinct()
+
+# determines length of the vectors for antenna bearings and vanishing bearing lines
+arr.sc <- 0.03 
+rad <- function(x) {x * pi/180}
+
+## Now we make the map
+
+ggmap(map.OC) +
+    geom_point(data = df.stations, aes(x = recvLon, y = recvLat), size = 1, 
+               colour = "goldenrod") +
+    # Add antenna bearings
+    geom_segment(data = df.stations, 
+                 aes(x = recvLon, xend = recvLon + (sin(rad(antBearing))*arr.sc), 
+                     y = recvLat, yend = recvLat + (cos(rad(antBearing))*arr.sc)), 
+                 colour = "goldenrod") +  
+  
+    # add vanishing bearings
+    geom_segment(data = filter(df.vanishBearing, motusTagID == tagID), 
+                 aes(x = recvLon, xend = recvLon + (sin(rad(vanish.bearing))*arr.sc),
+                     y = recvLat, yend = recvLat + (cos(rad(vanish.bearing))*arr.sc), 
+                     colour = motusTagID)) +
+  
+    # Add scale bar  
+    geom_segment(data = sbar,
+                 aes(x = lon.start, xend = lon.end,
+                     y = lat.start, yend = lat.end), 
+                 col = "black",
+                 arrow = arrow(angle = 90, length = unit(0.1, "cm"),
+                               ends = "both", type = "open")) +
+    geom_text(data = sbar,
+              aes(x = (lon.start + lon.end)/2,
+                  y = lat.start + 0.025*(bb$ur.lat - bb$ll.lat),
+                  label = paste(format(scalebar.length), 'km')),
+              hjust = 0.5,
+              vjust = 0,
+              size = 8/ptspermm, col = "black")  +
+    labs(x = "Longitude", y = "Latitude")
+```
+

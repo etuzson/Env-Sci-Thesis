@@ -1,0 +1,499 @@
+---
+title: "Vanishing Bearings"
+output:
+---
+
+
+```{r include=FALSE}
+Sys.setenv(TZ = "UTC")
+
+library(tidyverse)
+library(circular)
+library(lubridate)
+```
+
+
+CLEANING AND MERGING DATA INTO ONE DATA FRAME
+----------------------------------------------------------------------------------------------------------------------------
+
+
+```{r}
+# Import data
+bird_data <- read_csv("../Data/morbey_radio.csv", col_types = cols(
+                                                                  last_day = col_datetime(format = "%m/%d/%Y"),
+                                                                  depart_night = col_datetime(format = "%m/%d/%Y")
+                                                                  ))
+head(bird_data)
+```
+
+```{r}
+bird_data <- bird_data %>% 
+  
+             # Filter by desired depart_types
+             filter(depart_type %in% c("Interrupted", "Uninterrupted", "LPBOTip")) %>% 
+  
+             # Rename id to mfgID to keep it consistent with the signal_data dataset
+             rename(mfgID = id)
+```
+
+```{r}
+# Import motus data
+vanish_data_2014 <- read_rds("../Data/protandry2014.rds")
+vanish_data_2015 <- read_rds("../Data/protandry2015.rds")
+```
+
+```{r}
+# Filter out the birds that are not in bird_data for 2014 and 2015
+vanish_data_2014 <- vanish_data_2014 %>% 
+  
+                    # Birds that are in bird_data
+                    filter(mfgID %in% as.factor(bird_data$mfgID[bird_data$year == 2014])) %>% 
+  
+                    # Select for variables we are interested in
+                    select(mfgID, recvDeployName, recvDeployLat, recvDeployLon, antBearing, ts, sig, runLen, freqsd) %>% 
+
+                    # Filter out NAs
+                    filter(!is.na(antBearing), !is.na(ts), !is.na(sig))
+
+
+vanish_data_2015 <- vanish_data_2015 %>% 
+  
+                    # Birds that are in bird_data
+                    filter(mfgID %in% as.factor(bird_data$mfgID[bird_data$year == 2015])) %>% 
+  
+                    # Select for variables we are interested in
+                    select(mfgID, recvDeployName, recvDeployLat, recvDeployLon, antBearing, ts, sig, runLen, freqsd) %>% 
+
+                    # Filter out NAs
+                    filter(!is.na(antBearing), !is.na(ts), !is.na(sig))
+```
+
+```{r}
+# Combine 2014 and 2015 datasets into one data frame and extract year into its own column
+vanish_data <- rbind(vanish_data_2014, vanish_data_2015)
+vanish_data <- mutate(vanish_data, year = year(ts))
+```
+
+```{r}
+# Merge the bird_data and vanish_data datasets
+signal_data <- merge(bird_data, vanish_data, by.x = c("year", "mfgID"), by.y = c("year", "mfgID"))
+head(signal_data)
+```
+
+```{r}
+# Number of birds in data
+length(levels(as.factor(vanish_data$mfgID)))
+```
+
+
+```{r}
+signal_data <- signal_data %>% 
+  
+                      # Convert antBearing to factor
+                      mutate(antBearing = as.factor(antBearing)) %>% 
+          
+                      # Filter for days on or before depart_night
+                      filter(yday(ts) <= yday(depart_night)) %>% 
+                      
+                      # Filter number of tag bursts in current run > 2 and freqsd < 0.1 to eliminate bogus detections
+                      filter(runLen > 2 & freqsd < 0.1) %>% 
+  
+                      # Reorder rows so they are in order of recvDeployLat so that facets in graphs below show route of bird                         clearly in ascending latitude
+                      mutate(recvDeployName = reorder(recvDeployName, recvDeployLat)) %>% 
+
+                      # Reorder variables
+                      select(mfgID, year, depart_night, ts, sig, recvDeployName, recvDeployLat, recvDeployLon, antBearing,
+                             everything())
+
+head(signal_data)
+```
+
+```{r}
+# Determine how many unique birds there are in data
+length(levels(as.factor(signal_data$mfgID)))
+```
+
+```{r}
+# Graph distribution of signal data
+ggplot(data = signal_data) +
+  geom_histogram(mapping = aes(x = sig))
+```
+
+
+```{r}
+# Stanardize signal strength (maxSig is an outlier do not use)
+ minSig <- min(signal_data$sig)
+ maxSig <- max(signal_data$sig)
+
+# Values used in vanishing_bearing_examples (Motus R Book code)
+# Use these values instead of above ones to remove outlier maxSig value
+minSig <- -78.0691
+maxSig <- -17.8707
+
+# Standardize signal values
+signal_data <- signal_data %>% 
+                      mutate(sigStandard = (sig - minSig) / (maxSig - minSig)) %>% 
+                      select(mfgID, year, depart_night, ts, sig, sigStandard, everything())
+```
+
+```{r}
+# Save files so that repeat of processing is not necessary
+write_csv(bird_data, "../Data/bird_data_processed.csv")
+write_rds(signal_data, "../Data/signal_data_processed.rds")
+```
+
+
+DETERMINING DEPARTURE TIME FOR BIRDS IN DATA SET
+----------------------------------------------------------------------------------------------------------------------------
+
+```{r}
+# Import saved data files that were saved in previous chunk
+bird_data <- read_csv("../Data/bird_data_processed.csv")
+signal_data <- read_rds("../Data/signal_data_processed.rds")
+```
+
+```{r}
+# Reorder columns in bird_data for convenience
+bird_data <- bird_data %>% 
+             select(mfgID, year, mlos, last_day, depart_night, depart_type, depart_time, array_nights, everything())
+```
+
+```{r}
+# Import depart_times_manual.csv
+depart_times <- read_csv("../Data/depart_times_v2.csv")
+```
+
+```{r}
+# List of birds which do not have unusual data
+# i.e. depart_night and last_day are either the same or only 1 day apart, no NAs, depart_time value is not greater than 4
+# All of the ones listed here have their depart times in depart_times_manual.csv
+list_of_ordinary_departures <- c("7", "8", "10", "11", "15", "17", "18", "20", "21", "22", "24", "26", "31", "33", "54",                                       "277", "281", "288", "289", "291", "292", "297", "300", "303", "405", "408", "409",
+                                 "414", "417", "418", "420", "421", "422", "425", "427", "428", "431", "432", "433", "436",
+                                 "442", "450", "456", "458", "461", "462", "465", "466", "474", "480", "483", "485", "486",
+                                 "487", "488", "490", "492")
+
+# List of birds with an unusual depart_time value (such as greater than 4)
+# These ones do not have depart times in depart_times_manual.csv yet
+list_of_unusual_depart_times <- c("9", "12", "19", "444", "475", "489", "491")
+
+# List of birds with NA in last_day and depart_time
+# These ones have no depart times in depart_times_manual.csv
+list_of_NA_last_day_depart_time <- c("23", "278", "279", "304", "445", "453", "454", "472", "493")
+
+# List of birds with NA in depart_time but not anything else
+# Not in depart_times_manual.csv
+list_of_NA_depart_time <- c("407", "447")
+# These ones however did have a clear departure pattern and have a depart time in depart_times_manual.csv
+list_of_NA_depart_time_clear_departure <- c("424", "426", "449", "452", "455")
+
+# List of birds that were only detected at Western_University_Trailer_OldCut or whose departure detection was at that instead # of Old Cut
+# Not in depart_times_manual.csv
+list_of_western_university <- c("282", "284", "294", "299", "302", "412", "413", "416")
+
+# List of birds with a difference between last_day and depart_night of more than 1 day
+# No depart time in depart_times_manual.csv
+list_of_large_depart_night_difference <- c("457")
+
+# List of birds with depart times found which have no North/South antenna detections during departure
+list_of_no_north_south <- c("17", "18", "20", "21", "24", "26", "281", "288", "289", "292", "33", "414", "442", "452",                             "7", "8")
+
+# List of other birds with no clear departure pattern
+list_of_no_clear_departure_pattern <- c("287")
+```
+
+```{r}
+# List of birds that are in bird_data but got filtered out of signal_data
+list_of_filtered_out_signal_data <- c("59", "63", "64")
+```
+
+```{r}
+# Combine lists into one list that contains birds which to exclude
+list_to_exclude <- c(list_of_unusual_depart_times, list_of_NA_last_day_depart_time, list_of_NA_depart_time,
+                     list_of_western_university, list_of_large_depart_night_difference, list_of_no_clear_departure_pattern)
+```
+
+```{r}
+# List of bird id's
+levels(as.factor(signal_data$mfgID))
+```
+
+```{r}
+# Set which bird to work on and which year it was detected in
+bird_id <- "407"
+
+# Find what year a specific id was detected in
+yr <- levels(as.factor(signal_data$year[signal_data$mfgID == bird_id]))
+```
+
+```{r}
+# Store the filtered signal_data to speed up execution time
+signal_data_filtered <- signal_data %>% 
+                        filter(mfgID == bird_id, year == yr)
+
+# Create graph of signal detections
+ggplot(data = signal_data_filtered) +
+  
+  geom_point(mapping = aes(
+    x = ts,
+    y = sigStandard,
+    color = antBearing
+  )) +
+  
+  facet_grid(recvDeployName ~ .)
+```
+
+```{r}
+# Further filter signal_data_filtered and store for optimization
+signal_data_filtered <- signal_data_filtered %>% 
+                        filter(recvDeployName == "Old Cut", yday(ts) == yday(depart_night))
+
+# Zoom into the departure day at Old Cut
+ggplot(data = signal_data_filtered) +
+  
+  geom_point(mapping = aes(
+    x = ts,
+    y = sigStandard,
+    color = antBearing))
+```
+
+```{r}
+# Around what hour was the departure?
+depart_hour <- 21
+# Change minutes as well if necessary to zoom in further
+depart_minutes <- 0
+
+# Zoom further to determine exact departure time
+ggplot(data = filter(signal_data_filtered,
+    hour(ts) >= depart_hour,
+    minute(ts) >= depart_minutes)) +
+  
+  geom_point(mapping = aes(
+    x = ts,
+    y = sigStandard,
+    color = antBearing)) +
+  
+  scale_x_datetime(date_breaks = "2 min", date_labels = "%H:%M:%S") +
+  
+  theme(
+    axis.text.x = element_text(angle = 90)
+  )
+```
+
+
+```{r}
+# Use the peak signal value of the above time interval to determine the departure time
+peakSig <- signal_data_filtered %>% 
+           filter(hour(ts) >= depart_hour, minute(ts) >= depart_minutes)
+
+peakSig <- peakSig$ts[peakSig$sigStandard == max(peakSig$sigStandard)]
+```
+
+```{r}
+# If the previous chunk did not give a good depart_time then manually input it from looking at the graph in this chunk, otherwise skip to the next chunk (in the format ymd_hms)
+peakSig <- ""
+peakSig <- ymd_hms(peakSig)
+```
+
+```{r}
+# Use this method to find the departure times for all the birds in the data set
+
+# This data frame will hold the departure times and will later be merged with signal_data
+# As a precaution to not lose all the work, the if statement checks to see if the data frame already exists so it isn't
+# overwritten
+if (!("depart_times" %in% ls())){
+  depart_times <- data.frame(mfgID = character(0), departure_time = character(0), stringsAsFactors = FALSE)
+}
+```
+
+```{r}
+# Run this to add a new row to the depart_times data frame if doing each bird manually
+depart_times_v2[nrow(depart_times_v2) + 1, ] <- list(bird_id, as.character(peakSig)) 
+# Run backup below just in case you run previous chunk by accident resetting all progress
+```
+
+```{r}
+# Back up depart_times so you don't accidentaly reset all your work as an extra precaution
+depart_times_backup <- depart_times_v2
+```
+
+```{r}
+# Export depart_times
+write_csv(depart_times_v2, "../Data/depart_times_v2.csv")
+```
+
+```{r}
+# Calculate vanishing bearings
+
+depart_times_v3 <- depart_times %>% 
+                   filter(mfgID == 10)
+
+depart_times_v3[1,2] <- ymd_hms("2015-05-07 22:41:00")
+
+# Filter signal data to only include mfgIDs in depart_times
+signal_data_filtered <- signal_data %>% 
+                        filter(mfgID %in% levels(as.factor(depart_times_v3$mfgID)))
+
+vanishing_bearings_v3 <- right_join(signal_data_filtered, depart_times_v3, by = "mfgID") %>% 
+                        
+                            # Filter to the times only after the departure time and for Old Cut
+                            filter(ts >= departure_time, 
+                                   recvDeployName %in% c("Old Cut")) %>% 
+  
+                            # Remove duplicates
+                            distinct() %>% 
+  
+                            # Convert antBearing to character
+                            mutate(antBearing = as.character(antBearing)) %>% 
+  
+                            # Change north antenna bearing to be 0
+                            mutate(antBearing = ifelse(antBearing == "350.44327", "0", antBearing)) %>% 
+  
+                            # Change east antenna bearing to be 90
+                            mutate(antBearing = ifelse(antBearing == "90.44327", "90", antBearing)) %>%
+  
+                            # Change west antenna bearing to be 270
+                            mutate(antBearing = ifelse(antBearing == "260.44327", "270", antBearing)) %>%
+
+                            # Convert antBearing to numeric
+                            mutate(antBearing = as.numeric(antBearing)) %>% 
+  
+                            # Convert antenna bearing to circular type
+                            mutate(circ_bear = circular(antBearing,
+                                                        type = "angles",
+                                                        units = "degrees",
+                                                        rotation = "clock")) %>% 
+                            
+                            # Convert mfgID to character from factor
+                            mutate(mfgID = as.character(mfgID)) %>% 
+                                
+                            # Group by mfgID to be able to calculate vanishing bearings
+                            group_by(mfgID) %>% 
+    
+                            # Calculate vanishing bearings
+                            summarise(vanishing_bearing = weighted.mean(circ_bear, sigStandard, na.rm = FALSE,
+                                                                        control.circular = list(type = "angles",
+                                                                                                units = "degrees",
+                                                                                                rotation = "clock")),
+                                      minutes_used = as.duration(min(ts) %--% max(ts))) %>% 
+  
+                            as.data.frame()
+
+# Data frame of number of signal detections for each antenna (note that there were no south detections at Old Cut)
+
+antenna_detections <- right_join(signal_data_filtered, depart_times_v2, by = "mfgID") %>% 
+                        
+                            # Filter to the times only after the departure time and for Old Cut
+                            filter(ts >= departure_time, 
+                                   recvDeployName %in% c("Old Cut")) %>%
+  
+                            # Remove duplicates
+                            distinct() %>% 
+  
+                            # Convert antBearing to character
+                            mutate(antBearing = as.character(antBearing)) %>% 
+  
+                            # Change north antenna bearing to be 0
+                            mutate(antBearing = ifelse(antBearing == "350.44327", "0", antBearing)) %>% 
+  
+                            # Change east antenna bearing to be 90
+                            mutate(antBearing = ifelse(antBearing == "90.44327", "90", antBearing)) %>%
+  
+                            # Change west antenna bearing to be 270
+                            mutate(antBearing = ifelse(antBearing == "260.44327", "270", antBearing)) %>%
+                            
+                            # Convert mfgID to character from factor
+                            mutate(mfgID = as.character(mfgID))
+  
+antenna_detections_0 <- antenna_detections %>% 
+  
+                            # Filter out other antennas
+                            filter(antBearing == 0) %>% 
+  
+                            # Group by north antenna
+                            group_by(mfgID) %>% 
+  
+                            # Calculate number of detections
+                            summarise(n_detections_0 = n())
+
+antenna_detections_90 <- antenna_detections %>% 
+  
+                            # Filter out other antennas
+                            filter(antBearing == 90) %>% 
+  
+                            # Group by north antenna
+                            group_by(mfgID) %>% 
+  
+                            # Calculate number of detections
+                            summarise(n_detections_90 = n())
+
+antenna_detections_270 <- antenna_detections %>% 
+  
+                            # Filter out other antennas
+                            filter(antBearing == 270) %>% 
+  
+                            # Group by north antenna
+                            group_by(mfgID) %>% 
+  
+                            # Calculate number of detections
+                            summarise(n_detections_270 = n())
+
+antenna_detections_120 <- antenna_detections %>% 
+  
+                            # Filter out other antennas
+                            filter(antBearing == 120) %>% 
+  
+                            # Group by north antenna
+                            group_by(mfgID) %>% 
+  
+                            # Calculate number of detections
+                            summarise(n_detections_120 = n())
+
+antenna_detections_240 <- antenna_detections %>% 
+  
+                            # Filter out other antennas
+                            filter(antBearing == 240) %>% 
+  
+                            # Group by north antenna
+                            group_by(mfgID) %>% 
+  
+                            # Calculate number of detections
+                            summarise(n_detections_240 = n())
+
+# Merge with vanishing bearing data frame
+
+vanishing_bearings_v2 <- full_join(vanishing_bearings_v2, antenna_detections_0, by = "mfgID") %>% 
+                           full_join(antenna_detections_90, by = "mfgID") %>% 
+                           full_join(antenna_detections_270, by = "mfgID") %>% 
+                           full_join(antenna_detections_120, by = "mfgID") %>% 
+                           full_join(antenna_detections_240, by = "mfgID")
+
+# Change NA's to 0's where appropriate since 2015 and 2014 had different antenna orientations
+
+vanishing_bearings_v2 <- vanishing_bearings_v2 %>% 
+                         
+                         # First, convert all NA's in the n_detections_0 column to 0 since both years had a 0                                 degrees facing antenna
+                         mutate(n_detections_0 = ifelse(is.na(n_detections_0), 0, n_detections_0)) %>% 
+
+                         # For n_detections_90 and n_detections_270 will only replace NA's with 0's if one of them,                            but not both, are NA
+                         mutate(n_detections_90 = ifelse(is.na(n_detections_90) & !is.na(n_detections_270), 0,
+                                                         n_detections_90)) %>% 
+                         mutate(n_detections_270 = ifelse(is.na(n_detections_270) & !is.na(n_detections_90), 0,
+                                                         n_detections_270)) %>% 
+
+                         # For n_detections_120 and n_detections_240 will only replace NA's with 0's if one of                                them, but not both, are NA
+                         mutate(n_detections_120 = ifelse(is.na(n_detections_120) & !is.na(n_detections_240), 0,
+                                                         n_detections_120)) %>% 
+                         mutate(n_detections_240 = ifelse(is.na(n_detections_240) & !is.na(n_detections_120), 0,
+                                                         n_detections_240)) %>% 
+
+                         # Special cases mfgID's 428 and 431 have NA's for all columns except n_detections_0 so I                             verified that they were detected in 2014 manually and add 0's to the 120 and 240 columns
+                         mutate(n_detections_120 = ifelse(mfgID %in% c("428", "431"), 0, n_detections_120)) %>%
+                         mutate(n_detections_240 = ifelse(mfgID %in% c("428", "431"), 0, n_detections_240))
+
+```
+
+```{r}
+# Save the data
+write_rds(signal_data, "../Data/signal_data.rds")
+write_csv(vanishing_bearings_v2, "../Data/vanishing_bearings_v2.csv")
+```

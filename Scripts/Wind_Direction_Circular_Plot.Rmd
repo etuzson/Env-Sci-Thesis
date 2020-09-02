@@ -1,0 +1,163 @@
+---
+title: "Circular Plot of Wind Direction"
+output: html_document
+---
+
+```{r include=FALSE}
+library(circular)
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(RNCEP)
+library(ggplot2)
+```
+
+```{r}
+# Not used anywhere
+uwind <- NCEP.gather(
+  variable = "uwnd", 
+  level = 925,
+  months.minmax = 5,
+  years.minmax = c(2014, 2015),
+  lat.southnorth = c(42.5, 42.5),
+  lon.westeast = c(-80, -80),
+  reanalysis2 = FALSE,
+  return.units = TRUE)
+```
+
+```{r}
+uwind <- data.frame(uwind)
+head(uwind)
+```
+
+```{r}
+# Change datetime columns into rows
+uwind_tidy <- pivot_longer(uwind, cols = 1:ncol(uwind), names_to = "datetime", values_to = "wind.speed")
+
+# Remove "X280." from each datetime value
+uwind_tidy$datetime <- substr(uwind_tidy$datetime, 6, 18)
+
+# Add lat and lon columns
+uwind_tidy <- mutate(uwind_tidy, lat = 42.5, lon = 280)
+
+# Convert datetime to POSIXct format
+uwind_tidy$datetime <- ymd_h(uwind_tidy$datetime, tz = "GMT")
+
+head(uwind_tidy)
+```
+
+```{r}
+write.csv(uwind_tidy, "C:\\University\\Year 5\\Env Sci Honors Thesis\\Data\\NARR\\uwind_tidy.csv")
+```
+
+```{r}
+# Import datetime.csv
+dt <- read.csv("C:\\University\\Year 5\\Env Sci Honors Thesis\\Data\\NARR\\datetime.csv")
+```
+
+```{r}
+# Format datetime.csv
+dt_tidy <- transmute(dt, datetime = paste(date, time, sep = " "), 
+                         datetime2 = paste(date, "06:00:00", sep = " "))
+dt_tidy$datetime <- mdy_hms(dt_tidy$datetime, tz = "GMT")
+dt_tidy$datetime2 <- mdy_hms(dt_tidy$datetime2, tz = "GMT")
+
+head(dt_tidy)
+```
+
+```{r}
+write.csv(dt_tidy, "C:\\University\\Year 5\\Env Sci Honors Thesis\\Data\\NARR\\datetime_tidy.csv")
+```
+
+```{r}
+uwind_interp <- NCEP.interp(
+  variable = "uwnd",
+  level = 925,
+  lat = 42.583,
+  lon = 80.397,
+  dt = dt_tidy$datetime,
+  reanalysis2 = TRUE,
+  keep.unpacking.info = TRUE,
+  interpolate.space = TRUE,
+  interpolate.time = TRUE
+)
+
+vwind_interp <- NCEP.interp(
+  variable = "vwnd",
+  level = 925,
+  lat = 42.583,
+  lon = 80.397,
+  dt = dt_tidy$datetime,
+  reanalysis2 = TRUE,
+  keep.unpacking.info = TRUE,
+  interpolate.space = TRUE,
+  interpolate.time = TRUE
+)
+```
+
+```{r}
+uwind_interp <- data.frame(uwind_interp)
+vwind_interp <- data.frame(vwind_interp)
+head(uwind_interp)
+head(vwind_interp)
+```
+
+```{r}
+# Format uwind and vwind dataframes into one
+wind_interp_tidy <- mutate(uwind_interp, vwind_interp = vwind_interp$vwind_interp, datetime = dt_tidy$datetime, lat = 42.583, lon = 80.397)
+wind_interp_tidy <- select(wind_interp_tidy, datetime, lat, lon, everything())
+
+head(wind_interp_tidy)
+```
+
+
+```{r}
+# Calculate tailwind speed and angle
+tailwind_speed <- function(uwind, vwind) {
+  tailwind_speed <- sqrt(uwind ^ 2 + vwind ^ 2)
+  return(tailwind_speed)
+}
+tailwind_angle <- function(uwind, vwind) {
+  if(uwind >= 0 && vwind >= 0) {
+    tailwind_angle <- atan(vwind / uwind) * (180 / pi)
+  }
+  else if(uwind >= 0 && vwind <= 0) {
+    tailwind_angle <- 360 + atan(vwind / uwind) * (180 / pi)
+  }
+  else {
+    tailwind_angle <- 180 + atan(vwind / uwind) * (180 / pi)
+  }
+  return(tailwind_angle)
+}
+tailwind_angle <- Vectorize(tailwind_angle)
+
+wind_interp_tidy <- mutate(wind_interp_tidy, 
+                           tailwind_speed = tailwind_speed(wind_interp_tidy$uwind_interp,     
+                                                           wind_interp_tidy$vwind_interp),
+                           tailwind_angle = tailwind_angle(wind_interp_tidy$uwind_interp,
+                                                           wind_interp_tidy$vwind_interp))
+
+wind_interp_tidy$tailwind_angle <- as.circular(wind_interp_tidy$tailwind_angle, units = "degrees")
+
+head(wind_interp_tidy)
+str(wind_interp_tidy)
+```
+
+```{r}
+write.csv(wind_interp_tidy, "C:\\University\\Year 5\\Env Sci Honors Thesis\\Data\\NARR\\wind_interp_tidy.csv")
+```
+
+```{r}
+plot.circular(wind_interp_tidy$tailwind_angle, rotation = "clock")
+```
+
+```{r}
+ggplot(data = wind_interp_tidy) +
+  geom_point(mapping = aes(x = tailwind_angle, y = tailwind_speed)) +
+  scale_x_continuous(breaks = c(0, 90, 180, 270), limits = c(0, 360)) +
+  scale_y_continuous(breaks = 1:10) +
+  xlab("") +
+  ylab("") +
+  ggtitle("Wind Directions") +
+  coord_polar()
+```

@@ -1,0 +1,28 @@
+---
+title: "Consolidated_Circular_Plots"
+output: html_document
+---
+
+```{r include=FALSE}
+library(dplyr)
+library(circular)
+library(magrittr)
+```
+
+```{r}
+# Import datasets
+wind_data <- read.csv("../Data/wind_interp_tidy.csv")cale
+bird_data <- read.csv("../Data/morbey_radio.csv")
+```
+
+```{r}
+# Filter according to departure type
+bird_data <- filter(bird_data, depart_type %in% c("Interrupted", "Uninterrupted", "LPBOTip")) %>% 
+  filter(!is.na(depart_night)) %>% 
+  select(last_day)
+```
+
+```{r}
+
+```
+

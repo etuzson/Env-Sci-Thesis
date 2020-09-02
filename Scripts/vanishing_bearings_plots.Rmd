@@ -1,0 +1,158 @@
+---
+title: "Vanishing Bearings Plots"
+output:
+---
+
+```{r}
+rm(list = ls())
+Sys.setenv(TZ = "UTC")
+
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(circular)
+```
+
+```{r}
+# Import vanishing bearings
+vanishing_bearings <- read_csv("../Data/vanishing_bearings.csv")
+vanishing_bearings_v2 <- read_csv("../Data/vanishing_bearings_v2.csv")
+```
+
+```{r}
+# Convert vanishing_bearings to circular
+vanishing_bearings <- mutate(vanishing_bearings, vanishing_bearing = circular(vanishing_bearing,
+                                                                              type = "angles",
+                                                                              units = "degrees",
+                                                                              rotation = "clock"))
+vanishing_bearings_v2 <- mutate(vanishing_bearings_v2, vanishing_bearing = circular(vanishing_bearing,
+                                                                              type = "angles",
+                                                                              units = "degrees",
+                                                                              rotation = "clock"))
+```
+
+```{r}
+# Remove birds that had equal detections for East and West and no detections for North
+vanishing_bearings_v2 <- vanishing_bearings_v2 %>% 
+                         filter(!(mfgID %in% c(21, 26, 281, 414)))
+```
+
+```{r}
+# Plot vanishing bearings v1
+plot.circular(vanishing_bearings$vanishing_bearing, zero = pi / 2)
+arrows.circular(mean(vanishing_bearings$vanishing_bearing), zero = pi/2)
+```
+
+```{r}
+# Plot vanishing bearings v2
+plot.circular(vanishing_bearings_v2$vanishing_bearing, zero = pi / 2)
+arrows.circular(mean(vanishing_bearings_v2$vanishing_bearing), zero = pi/2)
+```
+
+```{r}
+# Plot v2 using ggplot to show different colors
+
+# Add column with a constant so that there is something to plot on y-axis plus convert negative angles to positive    so that it can be plotted using ggplot 
+vanishing_bearings_v2_ggplot <- mutate(vanishing_bearings_v2, bird_speed = 10) %>% 
+                                mutate(vanishing_bearing = ifelse(vanishing_bearing < 0, 360 + vanishing_bearing,                                                                     vanishing_bearing)) %>% 
+  
+                                # Add year column
+                                mutate(year = ifelse(is.na(n_detections_90), "2014", "2015"))
+
+
+ggplot(data = vanishing_bearings_v2_ggplot) +
+    
+  # Spaces out the points so they are closer to the outer edge of the graph and more visible, otherwise they would       be clumped up close to the center of the graph
+  geom_hline(yintercept = seq(0, 10), alpha = 0, size = 0.2) +
+    
+  geom_point(mapping = aes(
+    x = vanishing_bearing,
+    y = bird_speed,
+    shape = year
+    )) +
+    
+  scale_x_continuous(
+    breaks = c(0, 90, 180, 270),
+    labels = c("N", "E", "S", "W"),
+    limits = c(0, 360),
+    expand = c(0, 0)
+    ) +
+  
+  scale_y_continuous(
+    expand = c(0,0)
+  ) +
+    
+  xlab("") +
+  
+  ylab("") +
+    
+  ggtitle("Vanishing Bearings") +
+    
+  theme(plot.title = element_text(size = 11, hjust = 0.5)) +
+  
+  scale_shape_manual(name = "Year",
+                     values = c(21, 3),
+                     labels = c("2014", "2015")) +
+    
+  coord_polar()
+```
+```{r}
+rose.diag(vanishing_bearings_v2$vanishing_bearing, pch = 16, cex = 1, axes = TRUE, shrink = 1, 
+  bins = NULL, upper = TRUE, ticks = TRUE, tcl = 0.025, tcl.text = 0.125,
+  radii.scale = c("sqrt", "linear"), border=NULL, col=NULL, tol = 0.04,
+  uin = NULL, xlim = c(-1, 1), ylim = c(-1, 1), prop = 2, digits = 2, 
+  plot.info = NULL, units = NULL, template = NULL, zero = pi / 2, 
+  rotation = NULL, main = NULL, sub = NULL, xlab = "", ylab = "",
+  add = FALSE)
+
+CI <- mle.vonmises.bootstrap.ci(vanishing_bearings_v2$vanishing_bearing, mu = NULL, bias = FALSE, alpha = 0.05, reps = 1000)
+CI$mu.ci
+
+arrows.circular(CI$mu.ci, y = NULL, x0 = 0, y0 = 0, na.rm = FALSE, shrink = 1, plot.info = NULL, zero = pi/2,                      rotation = NULL,length=0.2,col=4,lwd=1)
+
+rho<-rho.circular(vanishing_bearings_v2$vanishing_bearing, na.rm=TRUE)
+rho
+
+arrows.circular(mean(vanishing_bearings_v2$vanishing_bearing), rho, zero = pi/2)
+```
+
+```{r}
+# Use geom_jitter to get better idea of distribution of points
+
+ggplot(data = vanishing_bearings_v2_ggplot) +
+  
+  # Spaces out the points so they are closer to the outer edge and more visible
+  geom_hline(yintercept = seq(0, 10), alpha = 0, size = 0.2) +
+    
+  geom_jitter(mapping = aes(
+    x = vanishing_bearing,
+    y = bird_speed,
+    shape = year
+    )) +
+    
+  scale_x_continuous(
+    breaks = c(0, 90, 180, 270),
+    labels = c("N", "E", "S", "W"),
+    limits = c(0, 360),
+    expand = c(0, 0)
+    ) +
+  
+  scale_y_continuous(
+    expand = c(0,0)
+  ) +
+    
+  xlab("") +
+  
+  ylab("") +
+    
+  ggtitle("Vanishing Bearings") +
+    
+  theme(plot.title = element_text(size = 11, hjust = 0.5)) +
+  
+  scale_shape_manual(name = "Year",
+                     values = c(21, 3),
+                     labels = c("2014", "2015")) +
+    
+  coord_polar()
+```
+
